@@ -93,6 +93,17 @@ def black_litterman(
     p = np.atleast_2d(np.asarray(p, dtype=float))
     q = np.atleast_1d(np.asarray(q, dtype=float))
 
+    if sigma.ndim != 2 or sigma.shape[0] != sigma.shape[1]:
+        raise ValueError("Sigma debe ser cuadrada")
+    if not np.isfinite(sigma).all() or not np.isfinite(p).all() or not np.isfinite(q).all():
+        raise ValueError("Black-Litterman recibió valores no finitos")
+    if not np.isfinite(tau) or tau <= 0:
+        raise ValueError("tau debe ser finito y > 0")
+    if p.shape[1] != sigma.shape[0]:
+        raise ValueError("P debe tener una columna por activo")
+    if len(q) != p.shape[0]:
+        raise ValueError("Q debe tener una entrada por view")
+
     pi = implied_equilibrium_returns(sigma, market_weights, risk_aversion)
     tau_sigma = tau * sigma
 
@@ -100,16 +111,8 @@ def black_litterman(
         omega = np.diag(np.diag(p @ tau_sigma @ p.T))
     omega = np.atleast_2d(np.asarray(omega, dtype=float))
 
-    if p.shape[1] != sigma.shape[0]:
-        raise ValueError("P debe tener una columna por activo")
-    if len(q) != p.shape[0]:
-        raise ValueError("Q debe tener una entrada por view")
     if omega.shape != (p.shape[0], p.shape[0]):
         raise ValueError("Omega debe tener forma (K, K)")
-    if not np.isfinite(tau) or tau <= 0:
-        raise ValueError("tau debe ser finito y > 0")
-    if not np.isfinite(sigma).all() or not np.isfinite(p).all() or not np.isfinite(q).all():
-        raise ValueError("Black-Litterman recibió valores no finitos")
     if not np.isfinite(omega).all():
         raise ValueError("Omega contiene valores no finitos")
 
