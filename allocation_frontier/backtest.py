@@ -164,7 +164,7 @@ def walk_forward(
 
         if pre_trade_weights is None:
             pre_trade = np.zeros(n_assets, dtype=float)
-            turnover = 1.0 if charge_initial_trade else 0.0
+            turnover = float(np.abs(target).sum()) if charge_initial_trade else 0.0
         else:
             pre_trade = pre_trade_weights.copy()
             turnover = float(np.abs(target - pre_trade).sum() / 2.0)
