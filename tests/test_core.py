@@ -122,3 +122,88 @@ def test_backtest_window_too_large_raises():
     r = RNG.normal(0, 0.01, (100, 3))
     with pytest.raises(ValueError):
         walk_forward(r, lambda ins: equal_weight(3), window=100, step=10)
+
+
+def test_backtest_weights_drift_inside_oos_block():
+    """Sin rebalanceo intra-bloque, un ganador gana peso antes del día siguiente."""
+    r = np.zeros((6, 2))
+    r[2] = [0.10, 0.0]
+    r[3] = [0.10, 0.0]
+
+    res = walk_forward(r, lambda ins: equal_weight(2), window=2, step=2)
+
+    assert np.isclose(res.gross_oos_returns[0], 0.05)
+
+    w_after_first = np.array([0.5 * 1.10, 0.5]) / 1.05
+    expected_second = float(w_after_first @ r[3])
+    assert np.isclose(res.gross_oos_returns[1], expected_second)
+    assert expected_second > 0.05  # prueba que no se restauró 50/50 diariamente
+
+    values_before_second_rebalance = np.array([0.5 * 1.10**2, 0.5])
+    expected_pretrade = values_before_second_rebalance / values_before_second_rebalance.sum()
+    assert np.allclose(res.pre_trade_weight_history[1], expected_pretrade)
+
+    expected_turnover = np.abs(np.array([0.5, 0.5]) - expected_pretrade).sum() / 2
+    assert np.isclose(res.turnover_history[1], expected_turnover)
+
+
+def test_backtest_transaction_cost_is_pathwise_at_rebalance():
+    """El coste real se descuenta cuando ocurre el trade, no ex-post del Sharpe."""
+    r = np.zeros((6, 2))
+    r[2] = [0.10, 0.0]
+    r[3] = [0.10, 0.0]
+    rate = 0.01
+
+    res = walk_forward(
+        r,
+        lambda ins: equal_weight(2),
+        window=2,
+        step=2,
+        transaction_cost_rate=rate,
+    )
+
+    turnover = res.turnover_history[1]
+    expected_cost = rate * turnover
+    assert np.isclose(res.cost_history[1], expected_cost)
+    # t=4 tiene retorno gross cero: el retorno neto es exactamente -coste.
+    assert np.isclose(res.gross_oos_returns[2], 0.0)
+    assert np.isclose(res.oos_returns[2], -expected_cost)
+    assert res.oos_returns[2] < res.gross_oos_returns[2]
+
+
+def test_backtest_initial_trade_cost_is_explicit_opt_in():
+    r = np.zeros((5, 2))
+    res_free = walk_forward(
+        r,
+        lambda ins: equal_weight(2),
+        window=2,
+        step=2,
+        transaction_cost_rate=0.01,
+        charge_initial_trade=False,
+    )
+    res_paid = walk_forward(
+        r,
+        lambda ins: equal_weight(2),
+        window=2,
+        step=2,
+        transaction_cost_rate=0.01,
+        charge_initial_trade=True,
+    )
+
+    assert np.isclose(res_free.turnover_history[0], 0.0)
+    assert np.isclose(res_free.oos_returns[0], 0.0)
+    assert np.isclose(res_paid.turnover_history[0], 1.0)
+    assert np.isclose(res_paid.oos_returns[0], -0.01)
+
+
+def test_backtest_rejects_invalid_execution_inputs():
+    r = np.zeros((10, 2))
+    with pytest.raises(ValueError):
+        walk_forward(r, lambda ins: equal_weight(2), window=3, step=0)
+    with pytest.raises(ValueError):
+        walk_forward(r, lambda ins: equal_weight(2), window=3, step=2, transaction_cost_rate=-0.1)
+
+    broken = r.copy()
+    broken[5, 0] = -1.0
+    with pytest.raises(ValueError):
+        walk_forward(broken, lambda ins: equal_weight(2), window=3, step=2)
