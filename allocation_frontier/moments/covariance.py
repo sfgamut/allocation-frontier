@@ -42,6 +42,28 @@ class CovarianceEstimator(Protocol):
     def estimate(self, returns: np.ndarray) -> np.ndarray: ...
 
 
+def _validate_returns(returns: np.ndarray, *, min_obs: int = 2) -> np.ndarray:
+    """Valida la matriz T×N antes de cualquier estimación."""
+    r = np.asarray(returns, dtype=float)
+    if r.ndim != 2 or r.shape[1] < 1:
+        raise ValueError("returns debe tener forma (T, N) con N >= 1")
+    if r.shape[0] < min_obs:
+        raise ValueError(f"se requieren al menos {min_obs} observaciones")
+    if not np.isfinite(r).all():
+        raise ValueError("returns contiene NaN/Inf")
+    return r
+
+
+def _require_positive_variances(var: np.ndarray, *, estimator: str) -> None:
+    bad = np.flatnonzero(~np.isfinite(var) | (var <= 0.0))
+    if len(bad):
+        indices = ", ".join(map(str, bad.tolist()))
+        raise ValueError(
+            f"{estimator} requiere varianza positiva por activo; "
+            f"activos constantes/no válidos en índices: {indices}"
+        )
+
+
 def _symmetrize(a: np.ndarray) -> np.ndarray:
     return 0.5 * (a + a.T)
 
@@ -55,7 +77,14 @@ def ensure_psd(sigma: np.ndarray, eps: float = _EPS_PSD) -> np.ndarray:
     estadística: la magnitud del clamp es órdenes por debajo del ruido
     de estimación.
     """
-    sigma = _symmetrize(np.asarray(sigma, dtype=float))
+    sigma = np.asarray(sigma, dtype=float)
+    if sigma.ndim != 2 or sigma.shape[0] != sigma.shape[1]:
+        raise ValueError("sigma debe ser una matriz cuadrada")
+    if not np.isfinite(sigma).all():
+        raise ValueError("sigma contiene NaN/Inf")
+    if not np.isfinite(eps) or eps < 0:
+        raise ValueError("eps debe ser finito y >= 0")
+    sigma = _symmetrize(sigma)
     vals, vecs = np.linalg.eigh(sigma)
     if vals.min() >= eps:
         return sigma
@@ -67,8 +96,9 @@ class SampleCovariance:
     """Covarianza muestral (insesgada, ddof=1). Base de comparación."""
 
     def estimate(self, returns: np.ndarray) -> np.ndarray:
-        r = np.asarray(returns, dtype=float)
-        return _symmetrize(np.cov(r, rowvar=False, ddof=1))
+        r = _validate_returns(returns)
+        sigma = np.atleast_2d(np.cov(r, rowvar=False, ddof=1))
+        return _symmetrize(sigma)
 
 
 class LedoitWolfShrinkage:
@@ -97,12 +127,13 @@ class LedoitWolfShrinkage:
         self.shrinkage_: float | None = None
 
     def estimate(self, returns: np.ndarray) -> np.ndarray:
-        x = np.asarray(returns, dtype=float)
+        x = _validate_returns(returns)
         t, n = x.shape
         x = x - x.mean(axis=0)
 
         s = _symmetrize((x.T @ x) / t)  # MLE, como en el paper
         var = np.diag(s).copy()
+        _require_positive_variances(var, estimator="Ledoit-Wolf")
         sd = np.sqrt(var)
         outer_sd = np.outer(sd, sd)
 
@@ -166,12 +197,14 @@ class RMTDenoisedCovariance:
         self.n_signal_: int | None = None
 
     def estimate(self, returns: np.ndarray) -> np.ndarray:
-        r = np.asarray(returns, dtype=float)
+        r = _validate_returns(returns)
         t, n = r.shape
         q = n / t
 
         s = _symmetrize(np.cov(r, rowvar=False, ddof=1))
-        sd = np.sqrt(np.diag(s))
+        var = np.diag(s)
+        _require_positive_variances(var, estimator="RMT")
+        sd = np.sqrt(var)
         c = s / np.outer(sd, sd)
         np.fill_diagonal(c, 1.0)
 
