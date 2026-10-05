@@ -79,3 +79,42 @@ def test_rmt_preserves_total_variance():
     s = SampleCovariance().estimate(r)
     den = RMTDenoisedCovariance().estimate(r)
     assert np.isclose(np.trace(den), np.trace(s), rtol=1e-6)
+
+
+def test_sample_covariance_one_asset_is_matrix():
+    r = RNG.normal(0, 0.01, size=(100, 1))
+    sigma = SampleCovariance().estimate(r)
+    assert sigma.shape == (1, 1)
+    assert sigma[0, 0] > 0
+
+
+@pytest.mark.parametrize("est", [LedoitWolfShrinkage(), RMTDenoisedCovariance()])
+def test_correlation_based_estimators_reject_constant_assets(est):
+    r = RNG.normal(0, 0.01, size=(100, 3))
+    r[:, 1] = 0.0
+    with pytest.raises(ValueError, match="varianza positiva"):
+        est.estimate(r)
+
+
+@pytest.mark.parametrize("est", ESTIMATORS, ids=lambda e: type(e).__name__)
+def test_estimators_reject_nonfinite_returns(est):
+    r = RNG.normal(0, 0.01, size=(100, 3))
+    r[5, 1] = np.nan
+    with pytest.raises(ValueError, match="NaN/Inf"):
+        est.estimate(r)
+
+
+def test_estimators_reject_too_few_observations():
+    r = np.array([[0.01, 0.02]])
+    for est in ESTIMATORS:
+        with pytest.raises(ValueError, match="al menos 2"):
+            est.estimate(r)
+
+
+def test_ensure_psd_rejects_non_square_and_nonfinite():
+    with pytest.raises(ValueError, match="cuadrada"):
+        ensure_psd(np.ones((2, 3)))
+    bad = np.eye(2)
+    bad[0, 0] = np.nan
+    with pytest.raises(ValueError, match="NaN/Inf"):
+        ensure_psd(bad)
