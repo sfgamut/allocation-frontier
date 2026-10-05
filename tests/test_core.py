@@ -79,6 +79,11 @@ def test_max_drawdown_hand_computed():
     assert np.isclose(max_drawdown(r), -0.20, atol=1e-12)
 
 
+def test_max_drawdown_counts_loss_from_initial_capital():
+    r = np.array([-0.10, 0.05])
+    assert np.isclose(max_drawdown(r), -0.10, atol=1e-12)
+
+
 def test_sharpe_hand_computed():
     r = np.array([0.01, -0.01, 0.01, -0.01])
     mean_ann = 0.0
