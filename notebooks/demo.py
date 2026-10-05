@@ -80,16 +80,23 @@ strategies = {
 }
 
 # ------------------------------------------------- walk-forward (OOS)
-W, STEP = 252, 21  # 2 años de estimación, rebalanceo mensual
-table, results = run_comparison(R, strategies, window=W, step=STEP)
+W, STEP = 252, 21  # ~1 año de estimación, rebalanceo mensual
+COST_RATE = 0.0020  # 20 bps por unidad de turnover one-way
+table, results = run_comparison(
+    R,
+    strategies,
+    window=W,
+    step=STEP,
+    transaction_cost_rate=COST_RATE,
+)
 
-# Neto de costos: 20 bps one-way por unidad de turnover, 12 rebalanceos/año.
-COST_BPS = 0.0020
-table["ann_return_net"] = table["ann_return"] - COST_BPS * table["avg_turnover"] * 12
-table["sharpe_net"] = table["ann_return_net"] / table["ann_vol"]
-table = table.sort_values("sharpe_net", ascending=False)
+# ann_return/sharpe ya son NETOS: el coste se paga en cada rebalanceo.
+# Conservamos estos aliases para que el CSV sea legible frente a v0.2.
+table["ann_return_net"] = table["ann_return"]
+table["sharpe_net"] = table["sharpe"]
+table = table.sort_values("sharpe", ascending=False)
 
-print("\n=== Cuadro comparativo out-of-sample (ordenado por Sharpe neto) ===")
+print("\n=== Cuadro comparativo out-of-sample (costes pathwise, Sharpe neto) ===")
 print(table.round(4).to_string())
 table.to_csv(FIGDIR.parent / "comparison_oos.csv")
 
