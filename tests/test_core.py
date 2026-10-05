@@ -8,7 +8,7 @@ from allocation_frontier.moments.returns import (
     black_litterman,
     implied_equilibrium_returns,
 )
-from allocation_frontier.optimize import equal_weight, max_sharpe, min_variance
+from allocation_frontier.optimize import PortfolioResult, equal_weight, max_sharpe, min_variance
 
 RNG = np.random.default_rng(0)
 
@@ -229,3 +229,26 @@ def test_backtest_rejects_invalid_execution_inputs():
     broken[5, 0] = -1.0
     with pytest.raises(ValueError):
         walk_forward(broken, lambda ins: equal_weight(2), window=3, step=2)
+
+
+def test_backtest_initial_trade_uses_gross_notional_for_long_short():
+    r = np.zeros((5, 2))
+
+    def long_short(_ins):
+        return PortfolioResult(
+            weights=np.array([1.5, -0.5]),
+            expected_return=np.nan,
+            expected_vol=np.nan,
+        )
+
+    res = walk_forward(
+        r,
+        long_short,
+        window=2,
+        step=2,
+        transaction_cost_rate=0.01,
+        charge_initial_trade=True,
+    )
+
+    assert np.isclose(res.turnover_history[0], 2.0)
+    assert np.isclose(res.oos_returns[0], -0.02)
