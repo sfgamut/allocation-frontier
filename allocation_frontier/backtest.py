@@ -113,7 +113,11 @@ class BacktestResult:
             "initial_turnover": (
                 float(self.turnover_history[0]) if len(self.turnover_history) else 0.0
             ),
-            "total_cost_fraction": float(np.sum(self.cost_history)),
+            "sum_rebalance_cost_fraction": float(np.sum(self.cost_history)),
+            "cumulative_rebalance_cost_drag": (
+                float(1.0 - np.prod(1.0 - self.cost_history))
+                if len(self.cost_history) else 0.0
+            ),
         }
 
 
