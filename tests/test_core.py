@@ -31,6 +31,19 @@ def test_bl_collapses_to_prior_with_uninformative_views():
     assert np.allclose(res.posterior_mean, pi, atol=1e-8)
 
 
+def test_bl_accepts_singular_sigma_when_view_system_is_defined():
+    """La forma Woodbury no exige invertir una Sigma semidefinida."""
+    sigma = np.array([[0.04, 0.04], [0.04, 0.04]])  # rango 1
+    p = np.array([[1.0, 0.0]])
+    q = np.array([0.08])
+    omega = np.array([[0.01]])
+
+    res = black_litterman(sigma, p, q, omega=omega)
+    assert np.isfinite(res.posterior_mean).all()
+    assert np.isfinite(res.posterior_cov).all()
+    assert np.allclose(res.posterior_cov, res.posterior_cov.T, atol=1e-12)
+
+
 def test_bl_view_moves_posterior_toward_q():
     sigma = _toy_sigma()
     n = sigma.shape[0]
