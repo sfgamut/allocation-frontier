@@ -187,6 +187,10 @@ def test_backtest_transaction_cost_is_pathwise_at_rebalance():
     assert np.isclose(res.gross_oos_returns[2], 0.0)
     assert np.isclose(res.oos_returns[2], -expected_cost)
     assert res.oos_returns[2] < res.gross_oos_returns[2]
+    summary = res.summary(periods_per_year=252)
+    expected_drag = 1.0 - np.prod(1.0 - res.cost_history)
+    assert np.isclose(summary["cumulative_rebalance_cost_drag"], expected_drag)
+    assert np.isclose(summary["sum_rebalance_cost_fraction"], res.cost_history.sum())
 
 
 def test_backtest_initial_trade_cost_is_explicit_opt_in():
