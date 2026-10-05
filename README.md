@@ -10,17 +10,31 @@ Los dos remedios implementados atacan el mismo mal por vías complementarias. **
 
 Del lado de los retornos, la media histórica se incluye como baseline honesto pero ruidoso —el error estándar de una media con vol del 20% y diez años de datos es del orden de la prima que se intenta medir— y **Black-Litterman** como remedio: ancla el retorno esperado a un prior de equilibrio por reverse-optimization y solo lo desplaza en la dirección de views con confianza explícita.
 
-## Qué muestra el cuadro comparativo
+## Qué mide el cuadro comparativo
 
-El backtest walk-forward (ventana rodante de estimación, rebalanceo periódico, retornos acumulados estrictamente fuera de muestra) corre cada combinación de estimador de covarianza × estimador de retorno × objetivo, contra la vara de medir que la literatura exige: el portafolio **1/N equiponderado**, que DeMiguel, Garlappi y Uppal (2009) mostraron sorprendentemente difícil de batir una vez descontado el error de estimación.
+El backtest walk-forward usa una ventana rodante de estimación y decide pesos
+solo con `returns[t-window:t]`. Desde v0.3, los holdings **derivan realmente**
+entre rebalanceos: no se restauran los pesos objetivo cada día. En el siguiente
+rebalanceo el turnover se mide contra los pesos pre-trade que resultaron de esa
+deriva, y los costes se descuentan en la trayectoria cuando ocurre el trade.
 
-La corrida de demostración (mercado sintético factorial de 40 activos, `q ≈ 0.16`) deja dos lecciones que conviene leer con honestidad. Primero, en un mundo gaussiano y estacionario —el más amable posible para Markowitz— la media histórica sí contiene señal y el max-Sharpe ingenuo gana en Sharpe bruto; la patología clásica se manifiesta no en el retorno sino en el **turnover**, un orden de magnitud mayor que el de Black-Litterman (0.29 vs 0.01 por rebalanceo), que es exactamente el costo del ruido de estimación convertido en rotación de cartera. Segundo, las estrategias min-varianza con estimadores robustos entregan la menor volatilidad y el menor drawdown realizados, que es lo que prometen. Sobre datos reales —colas pesadas, regímenes, primas inestables— la ventaja de la media histórica típicamente se evapora y el ranking se invierte; el pipeline es idéntico, basta sustituir la fuente de datos.
+El cuadro compara cada combinación de estimador de covarianza × estimador de
+retorno × objetivo contra el portafolio **1/N equiponderado**. Publica retorno y
+Sharpe netos, sus equivalentes gross, drawdown, turnover ejecutado y drag de
+costes. Esto separa tres preguntas que v0.2 mezclaba: qué target decidió el
+optimizador, cómo evolucionaron las posiciones al mantenerlas y cuánto costó
+volver al target.
+
+Los resultados numéricos de v0.2 no se presentan como evidencia de v0.3. El
+demo regenerará `comparison_oos.csv` y la curva de riqueza usando la nueva
+semántica; hasta entonces es preferible no publicar un ranking a conservar uno
+calculado con una convención de ejecución incorrecta.
 
 ## Uso
 
 ```bash
 uv sync
-uv run pytest          # 19 tests, incluido el de no-lookahead
+uv run pytest          # incluye no-lookahead, weight drift y costes pathwise
 uv run python notebooks/demo.py
 ```
 
@@ -28,8 +42,22 @@ Con datos reales: `data.load_prices_yfinance(["SPY", "TLT", ...], start="2015-01
 
 ## Garantías de corrección
 
-Toda covarianza devuelta es simétrica y PSD (los autovalores levemente negativos por reconstrucción numérica se clampean a ε documentadamente). Ledoit-Wolf se verifica contra sklearn como oráculo; RMT se verifica sobre ruido i.i.d. puro (debe detectar ~cero señal) y sobre un modelo factorial (debe conservar el factor de mercado) preservando la varianza total. Black-Litterman pasa el test de colapso al prior con views no informativas. Y el test crítico del backtest inyecta un shock artificial en el futuro de la serie y verifica que ningún peso decidido antes del shock cambia: si ese test falla, todos los resultados del backtest son inválidos por construcción.
+Las covarianzas se validan antes de estimar: NaN/Inf y muestras demasiado
+cortas fallan explícitamente; los estimadores basados en correlación rechazan
+activos de varianza cero en vez de propagar divisiones por cero. Toda
+covarianza reconstruida se mantiene simétrica y PSD.
+
+Ledoit-Wolf se contrasta con sklearn por propiedades; RMT se prueba sobre ruido
+i.i.d. y sobre un modelo factorial preservando varianza total. Black-Litterman
+usa sistemas lineales en lugar de inversiones explícitas y se prueba incluso
+con una covarianza PSD singular cuando el sistema de views está definido.
+
+El backtest conserva como invariantes separados: no-lookahead, deriva exacta de
+holdings, turnover contra pesos pre-trade y costes pathwise. Un shock inyectado
+en el futuro no puede cambiar decisiones anteriores; una estrategia 50/50 con
+un activo ganador debe dejar de ser 50/50 al período siguiente si no hubo
+rebalanceo.
 
 ## Arquitectura
 
-`moments/covariance.py` y `moments/returns.py` contienen los estimadores con interfaz uniforme; `optimize.py` resuelve min-varianza, max-Sharpe y target-return con SLSQP (QP chicos con restricciones lineales no justifican cvxpy; la decisión está documentada en el módulo); `frontier.py` implementa la frontera clásica y la resampleada de Michaud sobre un Monte Carlo paramétrico vectorizado; `backtest.py` y `metrics.py` producen el cuadro comparativo OOS; `plotting.py` genera las cuatro familias de figuras (fronteras, heatmaps de denoising, equity curves, pesos promedio).
+`moments/covariance.py` y `moments/returns.py` contienen los estimadores con interfaz uniforme; `optimize.py` resuelve min-varianza, max-Sharpe y target-return con SLSQP (QP chicos con restricciones lineales no justifican cvxpy; la decisión está documentada en el módulo); `frontier.py` implementa la frontera clásica y la resampleada de Michaud sobre un Monte Carlo paramétrico vectorizado; `backtest.py` modela holdings, rebalanceos y costes; `metrics.py` produce las métricas OOS; `plotting.py` genera las cuatro familias de figuras (fronteras, heatmaps de denoising, equity curves, pesos promedio).
