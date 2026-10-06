@@ -32,5 +32,5 @@ jobs:
         run: python -m pytest -q
       - name: Compile package
         run: python -m compileall -q allocation_frontier
-      - name: End-to-end demo
-        run: python notebooks/demo.py
+      - name: End-to-end smoke demo
+        run: ALLOC_FRONTIER_SMOKE=1 python notebooks/demo.py
