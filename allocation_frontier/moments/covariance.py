@@ -208,7 +208,13 @@ class RMTDenoisedCovariance:
         t, n = r.shape
         q = n / t
 
-        s = _symmetrize(np.cov(r, rowvar=False, ddof=1))
+        s = _symmetrize(np.atleast_2d(np.cov(r, rowvar=False, ddof=1)))
+        # Con un solo activo no existe espectro multivariante para denoising.
+        # Retornar la covarianza muestral, sin fingir señal/ruido MP.
+        if n == 1:
+            self.lambda_plus_ = None
+            self.n_signal_ = None
+            return ensure_psd(s)
         var = np.diag(s)
         _require_positive_variances(var, estimator="RMT")
         sd = np.sqrt(var)
