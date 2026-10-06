@@ -118,3 +118,13 @@ def test_ensure_psd_rejects_non_square_and_nonfinite():
     bad[0, 0] = np.nan
     with pytest.raises(ValueError, match="NaN/Inf"):
         ensure_psd(bad)
+
+
+def test_ledoit_wolf_one_asset_degenerates_to_sample_variance():
+    r = RNG.normal(0, 0.01, size=(100, 1))
+    est = LedoitWolfShrinkage()
+    sigma = est.estimate(r)
+    sample = SampleCovariance().estimate(r)
+    assert sigma.shape == (1, 1)
+    assert np.allclose(sigma, sample, atol=1e-12)
+    assert est.shrinkage_ == 0.0
