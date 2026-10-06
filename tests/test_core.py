@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from allocation_frontier.backtest import walk_forward
-from allocation_frontier.metrics import max_drawdown, sharpe_ratio
+from allocation_frontier.metrics import max_drawdown, sharpe_ratio, spectral_effective_bets
 from allocation_frontier.moments.returns import (
     absolute_view,
     black_litterman,
@@ -264,3 +264,23 @@ def test_implied_equilibrium_returns_rejects_invalid_market_weights():
         implied_equilibrium_returns(sigma, np.array([0.8, 0.3, -0.1]))
     with pytest.raises(ValueError, match="risk_aversion"):
         implied_equilibrium_returns(sigma, risk_aversion=0.0)
+
+
+# ---------- Diversificación espectral / paridad SATOR ----------
+
+def test_spectral_effective_bets_equal_independent_assets():
+    sigma = np.eye(4)
+    w = np.full(4, 0.25)
+    assert np.isclose(spectral_effective_bets(w, sigma), 4.0, atol=1e-12)
+
+
+def test_spectral_effective_bets_perfectly_correlated_assets_is_one():
+    sigma = np.ones((4, 4))
+    w = np.full(4, 0.25)
+    assert np.isclose(spectral_effective_bets(w, sigma), 1.0, atol=1e-10)
+
+
+def test_spectral_effective_bets_respects_sator_weight_threshold():
+    sigma = np.eye(3)
+    w = np.array([0.994, 0.003, 0.003])
+    assert np.isclose(spectral_effective_bets(w, sigma, min_weight=0.005), 1.0)
