@@ -10,6 +10,7 @@ Ejecutar:  python notebooks/demo.py   (desde la raíz del repo)
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -37,7 +38,15 @@ from allocation_frontier import plotting
 FIGDIR = Path(__file__).parent / "figures"
 
 # ---------------------------------------------------------------- datos
-mkt = data.synthetic_market(n_assets=40, n_days=2520, n_sectors=5, seed=11)
+# El demo completo es deliberadamente pesado. CI usa el mismo pipeline en modo
+# smoke para no convertir un benchmark Monte Carlo en un gate de ~20 minutos.
+SMOKE = os.environ.get("ALLOC_FRONTIER_SMOKE") == "1"
+N_ASSETS = 12 if SMOKE else 40
+N_DAYS = 756 if SMOKE else 2520
+N_SECTORS = 3 if SMOKE else 5
+mkt = data.synthetic_market(
+    n_assets=N_ASSETS, n_days=N_DAYS, n_sectors=N_SECTORS, seed=11
+)
 R = mkt.returns.to_numpy()
 names = list(mkt.returns.columns)
 print(f"Mercado sintético: {R.shape[0]} días × {R.shape[1]} activos")
@@ -80,7 +89,7 @@ strategies = {
 }
 
 # ------------------------------------------------- walk-forward (OOS)
-W, STEP = 252, 21  # ~1 año de estimación, rebalanceo mensual
+W, STEP = (126, 21) if SMOKE else (252, 21)  # smoke ~6 meses; demo ~1 año
 COST_RATE = 0.0020  # 20 bps por unidad de turnover one-way
 table, results = run_comparison(
     R,
@@ -104,10 +113,12 @@ table.to_csv(FIGDIR.parent / "comparison_oos.csv")
 ins = R[:W]
 mu_hat = historical_mean(ins)
 sig_hat = SAMPLE.estimate(ins) * 252
-fr_classic = efficient_frontier(mu_hat, sig_hat, n_points=25)
+frontier_points = 8 if SMOKE else 25
+resample_scenarios = 8 if SMOKE else 120
+fr_classic = efficient_frontier(mu_hat, sig_hat, n_points=frontier_points)
 fr_resampled = resampled_frontier(
-    mu_hat, sig_hat, t_obs=W, n_scenarios=120, n_points=25,
-    rng=np.random.default_rng(1),
+    mu_hat, sig_hat, t_obs=W, n_scenarios=resample_scenarios,
+    n_points=frontier_points, rng=np.random.default_rng(1),
 )
 plotting.plot_frontiers(fr_classic, fr_resampled, FIGDIR)
 
