@@ -120,11 +120,12 @@ def test_ensure_psd_rejects_non_square_and_nonfinite():
         ensure_psd(bad)
 
 
-def test_ledoit_wolf_one_asset_degenerates_to_sample_variance():
+def test_ledoit_wolf_one_asset_degenerates_to_its_mle_variance():
+    """Con N=1 no hay correlación off-diagonal; LW queda en su S MLE (ddof=0)."""
     r = RNG.normal(0, 0.01, size=(100, 1))
     est = LedoitWolfShrinkage()
     sigma = est.estimate(r)
-    sample = SampleCovariance().estimate(r)
+    expected = float(np.var(r[:, 0], ddof=0))
     assert sigma.shape == (1, 1)
-    assert np.allclose(sigma, sample, atol=1e-12)
+    assert np.isclose(sigma[0, 0], expected, atol=1e-12)
     assert est.shrinkage_ == 0.0
