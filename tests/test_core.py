@@ -252,3 +252,15 @@ def test_backtest_initial_trade_uses_gross_notional_for_long_short():
 
     assert np.isclose(res.turnover_history[0], 2.0)
     assert np.isclose(res.oos_returns[0], -0.02)
+
+
+def test_implied_equilibrium_returns_rejects_invalid_market_weights():
+    sigma = np.eye(3)
+    with pytest.raises(ValueError, match="una entrada por activo"):
+        implied_equilibrium_returns(sigma, np.array([0.5, 0.5]))
+    with pytest.raises(ValueError, match="sumar 1"):
+        implied_equilibrium_returns(sigma, np.array([0.2, 0.2, 0.2]))
+    with pytest.raises(ValueError, match="pesos negativos"):
+        implied_equilibrium_returns(sigma, np.array([0.8, 0.3, -0.1]))
+    with pytest.raises(ValueError, match="risk_aversion"):
+        implied_equilibrium_returns(sigma, risk_aversion=0.0)
