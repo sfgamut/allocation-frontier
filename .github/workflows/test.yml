@@ -1,0 +1,36 @@
+name: allocation-tests
+
+on:
+  pull_request:
+    paths:
+      - "allocation_frontier/**"
+      - "tests/**"
+      - "notebooks/demo.py"
+      - "pyproject.toml"
+      - ".github/workflows/test.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: allocation-tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - name: Install package and test dependencies
+        run: python -m pip install -e . pytest scikit-learn
+      - name: Unit tests
+        run: python -m pytest -q
+      - name: Compile package
+        run: python -m compileall -q allocation_frontier
+      - name: End-to-end smoke demo
+        run: ALLOC_FRONTIER_SMOKE=1 python notebooks/demo.py

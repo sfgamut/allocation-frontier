@@ -54,8 +54,27 @@ def implied_equilibrium_returns(
     hacia activos de alta covarianza con el 1/N.
     """
     sigma = np.asarray(sigma, dtype=float)
+    if sigma.ndim != 2 or sigma.shape[0] != sigma.shape[1]:
+        raise ValueError("Sigma debe ser cuadrada")
+    if not np.isfinite(sigma).all():
+        raise ValueError("Sigma contiene valores no finitos")
+    if not np.isfinite(risk_aversion) or risk_aversion <= 0:
+        raise ValueError("risk_aversion debe ser finito y > 0")
+
     n = sigma.shape[0]
-    w = np.full(n, 1.0 / n) if market_weights is None else np.asarray(market_weights, float)
+    if market_weights is None:
+        w = np.full(n, 1.0 / n)
+    else:
+        w = np.asarray(market_weights, dtype=float).reshape(-1)
+        if len(w) != n:
+            raise ValueError("market_weights debe tener una entrada por activo")
+        if not np.isfinite(w).all():
+            raise ValueError("market_weights contiene valores no finitos")
+        if not np.isclose(w.sum(), 1.0, atol=1e-8):
+            raise ValueError("market_weights debe sumar 1")
+        if (w < 0).any():
+            raise ValueError("market_weights de equilibrio no admite pesos negativos")
+
     return risk_aversion * sigma @ w
 
 
@@ -93,6 +112,17 @@ def black_litterman(
     p = np.atleast_2d(np.asarray(p, dtype=float))
     q = np.atleast_1d(np.asarray(q, dtype=float))
 
+    if sigma.ndim != 2 or sigma.shape[0] != sigma.shape[1]:
+        raise ValueError("Sigma debe ser cuadrada")
+    if not np.isfinite(sigma).all() or not np.isfinite(p).all() or not np.isfinite(q).all():
+        raise ValueError("Black-Litterman recibió valores no finitos")
+    if not np.isfinite(tau) or tau <= 0:
+        raise ValueError("tau debe ser finito y > 0")
+    if p.shape[1] != sigma.shape[0]:
+        raise ValueError("P debe tener una columna por activo")
+    if len(q) != p.shape[0]:
+        raise ValueError("Q debe tener una entrada por view")
+
     pi = implied_equilibrium_returns(sigma, market_weights, risk_aversion)
     tau_sigma = tau * sigma
 
@@ -100,13 +130,29 @@ def black_litterman(
         omega = np.diag(np.diag(p @ tau_sigma @ p.T))
     omega = np.atleast_2d(np.asarray(omega, dtype=float))
 
-    ts_inv = np.linalg.inv(tau_sigma)
-    om_inv = np.linalg.inv(omega)
+    if omega.shape != (p.shape[0], p.shape[0]):
+        raise ValueError("Omega debe tener forma (K, K)")
+    if not np.isfinite(omega).all():
+        raise ValueError("Omega contiene valores no finitos")
 
-    a = ts_inv + p.T @ om_inv @ p
-    b = ts_inv @ pi + p.T @ om_inv @ q
-    posterior_cov = np.linalg.inv(a)
-    posterior_mean = posterior_cov @ b
+    # Forma algebraicamente equivalente vía Woodbury:
+    # M = τΣ
+    # μ_post = Π + M P' (P M P' + Ω)^-1 (Q - PΠ)
+    # Σ_post = M - M P' (P M P' + Ω)^-1 P M
+    #
+    # Evita invertir τΣ y Ω por separado. Esto es más estable y, además,
+    # admite Σ semidefinida siempre que el sistema en el espacio de views
+    # esté bien definido.
+    view_system = p @ tau_sigma @ p.T + omega
+    try:
+        solved = np.linalg.solve(view_system, p @ tau_sigma)
+    except np.linalg.LinAlgError as exc:
+        raise ValueError("el sistema de views de Black-Litterman es singular") from exc
+
+    gain = solved.T
+    posterior_mean = pi + gain @ (q - p @ pi)
+    posterior_cov = tau_sigma - gain @ p @ tau_sigma
+    posterior_cov = (posterior_cov + posterior_cov.T) / 2.0
 
     return BlackLittermanResult(posterior_mean, pi, posterior_cov)
 

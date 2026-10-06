@@ -1,14 +1,23 @@
+import json
+from pathlib import Path
+
 import numpy as np
 import pytest
 
 from allocation_frontier.backtest import walk_forward
-from allocation_frontier.metrics import max_drawdown, sharpe_ratio
+from allocation_frontier.moments.covariance import LedoitWolfShrinkage
+from allocation_frontier.metrics import (
+    max_drawdown,
+    sharpe_ratio,
+    spectral_bet_diagnostics,
+    spectral_effective_bets,
+)
 from allocation_frontier.moments.returns import (
     absolute_view,
     black_litterman,
     implied_equilibrium_returns,
 )
-from allocation_frontier.optimize import equal_weight, max_sharpe, min_variance
+from allocation_frontier.optimize import PortfolioResult, equal_weight, max_sharpe, min_variance
 
 RNG = np.random.default_rng(0)
 
@@ -29,6 +38,19 @@ def test_bl_collapses_to_prior_with_uninformative_views():
     omega = np.eye(n) * 1e12  # views con confianza nula
     res = black_litterman(sigma, p, pi, omega=omega)
     assert np.allclose(res.posterior_mean, pi, atol=1e-8)
+
+
+def test_bl_accepts_singular_sigma_when_view_system_is_defined():
+    """La forma Woodbury no exige invertir una Sigma semidefinida."""
+    sigma = np.array([[0.04, 0.04], [0.04, 0.04]])  # rango 1
+    p = np.array([[1.0, 0.0]])
+    q = np.array([0.08])
+    omega = np.array([[0.01]])
+
+    res = black_litterman(sigma, p, q, omega=omega)
+    assert np.isfinite(res.posterior_mean).all()
+    assert np.isfinite(res.posterior_cov).all()
+    assert np.allclose(res.posterior_cov, res.posterior_cov.T, atol=1e-12)
 
 
 def test_bl_view_moves_posterior_toward_q():
@@ -79,6 +101,11 @@ def test_max_drawdown_hand_computed():
     assert np.isclose(max_drawdown(r), -0.20, atol=1e-12)
 
 
+def test_max_drawdown_counts_loss_from_initial_capital():
+    r = np.array([-0.10, 0.05])
+    assert np.isclose(max_drawdown(r), -0.10, atol=1e-12)
+
+
 def test_sharpe_hand_computed():
     r = np.array([0.01, -0.01, 0.01, -0.01])
     mean_ann = 0.0
@@ -122,3 +149,181 @@ def test_backtest_window_too_large_raises():
     r = RNG.normal(0, 0.01, (100, 3))
     with pytest.raises(ValueError):
         walk_forward(r, lambda ins: equal_weight(3), window=100, step=10)
+
+
+def test_backtest_weights_drift_inside_oos_block():
+    """Sin rebalanceo intra-bloque, un ganador gana peso antes del día siguiente."""
+    r = np.zeros((6, 2))
+    r[2] = [0.10, 0.0]
+    r[3] = [0.10, 0.0]
+
+    res = walk_forward(r, lambda ins: equal_weight(2), window=2, step=2)
+
+    assert np.isclose(res.gross_oos_returns[0], 0.05)
+
+    w_after_first = np.array([0.5 * 1.10, 0.5]) / 1.05
+    expected_second = float(w_after_first @ r[3])
+    assert np.isclose(res.gross_oos_returns[1], expected_second)
+    assert expected_second > 0.05  # prueba que no se restauró 50/50 diariamente
+
+    values_before_second_rebalance = np.array([0.5 * 1.10**2, 0.5])
+    expected_pretrade = values_before_second_rebalance / values_before_second_rebalance.sum()
+    assert np.allclose(res.pre_trade_weight_history[1], expected_pretrade)
+
+    expected_turnover = np.abs(np.array([0.5, 0.5]) - expected_pretrade).sum() / 2
+    assert np.isclose(res.turnover_history[1], expected_turnover)
+
+
+def test_backtest_transaction_cost_is_pathwise_at_rebalance():
+    """El coste real se descuenta cuando ocurre el trade, no ex-post del Sharpe."""
+    r = np.zeros((6, 2))
+    r[2] = [0.10, 0.0]
+    r[3] = [0.10, 0.0]
+    rate = 0.01
+
+    res = walk_forward(
+        r,
+        lambda ins: equal_weight(2),
+        window=2,
+        step=2,
+        transaction_cost_rate=rate,
+    )
+
+    turnover = res.turnover_history[1]
+    expected_cost = rate * turnover
+    assert np.isclose(res.cost_history[1], expected_cost)
+    # t=4 tiene retorno gross cero: el retorno neto es exactamente -coste.
+    assert np.isclose(res.gross_oos_returns[2], 0.0)
+    assert np.isclose(res.oos_returns[2], -expected_cost)
+    assert res.oos_returns[2] < res.gross_oos_returns[2]
+    summary = res.summary(periods_per_year=252)
+    expected_drag = 1.0 - np.prod(1.0 - res.cost_history)
+    assert np.isclose(summary["cumulative_rebalance_cost_drag"], expected_drag)
+    assert np.isclose(summary["sum_rebalance_cost_fraction"], res.cost_history.sum())
+
+
+def test_backtest_initial_trade_cost_is_explicit_opt_in():
+    r = np.zeros((5, 2))
+    res_free = walk_forward(
+        r,
+        lambda ins: equal_weight(2),
+        window=2,
+        step=2,
+        transaction_cost_rate=0.01,
+        charge_initial_trade=False,
+    )
+    res_paid = walk_forward(
+        r,
+        lambda ins: equal_weight(2),
+        window=2,
+        step=2,
+        transaction_cost_rate=0.01,
+        charge_initial_trade=True,
+    )
+
+    assert np.isclose(res_free.turnover_history[0], 0.0)
+    assert np.isclose(res_free.oos_returns[0], 0.0)
+    assert np.isclose(res_paid.turnover_history[0], 1.0)
+    assert np.isclose(res_paid.oos_returns[0], -0.01)
+
+
+def test_backtest_rejects_invalid_execution_inputs():
+    r = np.zeros((10, 2))
+    with pytest.raises(ValueError):
+        walk_forward(r, lambda ins: equal_weight(2), window=3, step=0)
+    with pytest.raises(ValueError):
+        walk_forward(r, lambda ins: equal_weight(2), window=3, step=2, transaction_cost_rate=-0.1)
+
+    broken = r.copy()
+    broken[5, 0] = -1.0
+    with pytest.raises(ValueError):
+        walk_forward(broken, lambda ins: equal_weight(2), window=3, step=2)
+
+
+def test_backtest_initial_trade_uses_gross_notional_for_long_short():
+    r = np.zeros((5, 2))
+
+    def long_short(_ins):
+        return PortfolioResult(
+            weights=np.array([1.5, -0.5]),
+            expected_return=np.nan,
+            expected_vol=np.nan,
+        )
+
+    res = walk_forward(
+        r,
+        long_short,
+        window=2,
+        step=2,
+        transaction_cost_rate=0.01,
+        charge_initial_trade=True,
+    )
+
+    assert np.isclose(res.turnover_history[0], 2.0)
+    assert np.isclose(res.oos_returns[0], -0.02)
+
+
+def test_implied_equilibrium_returns_rejects_invalid_market_weights():
+    sigma = np.eye(3)
+    with pytest.raises(ValueError, match="una entrada por activo"):
+        implied_equilibrium_returns(sigma, np.array([0.5, 0.5]))
+    with pytest.raises(ValueError, match="sumar 1"):
+        implied_equilibrium_returns(sigma, np.array([0.2, 0.2, 0.2]))
+    with pytest.raises(ValueError, match="pesos negativos"):
+        implied_equilibrium_returns(sigma, np.array([0.8, 0.3, -0.1]))
+    with pytest.raises(ValueError, match="risk_aversion"):
+        implied_equilibrium_returns(sigma, risk_aversion=0.0)
+
+
+# ---------- Diversificación espectral / paridad SATOR ----------
+
+def test_spectral_effective_bets_equal_independent_assets():
+    sigma = np.eye(4)
+    w = np.full(4, 0.25)
+    assert np.isclose(spectral_effective_bets(w, sigma), 4.0, atol=1e-12)
+
+
+def test_spectral_effective_bets_perfectly_correlated_assets_is_one():
+    sigma = np.ones((4, 4))
+    w = np.full(4, 0.25)
+    assert np.isclose(spectral_effective_bets(w, sigma), 1.0, atol=1e-10)
+
+
+def test_spectral_effective_bets_respects_sator_weight_threshold():
+    sigma = np.eye(3)
+    w = np.array([0.994, 0.003, 0.003])
+    assert np.isclose(spectral_effective_bets(w, sigma, min_weight=0.005), 1.0)
+
+
+def test_sator_allocation_parity_fixture():
+    fixture_path = Path(__file__).parent / "fixtures" / "allocation_parity.v1.json"
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    r = np.asarray(fixture["returns"], dtype=float)
+    w = np.asarray(fixture["weights"], dtype=float)
+    expected = fixture["expected"]
+
+    est = LedoitWolfShrinkage()
+    sigma = est.estimate(r)
+
+    assert np.isclose(est.shrinkage_, expected["shrinkage"], atol=1e-12)
+    assert np.allclose(sigma, np.asarray(expected["covariance"]), atol=1e-12)
+
+    risk = float(np.sqrt(w @ sigma @ w))
+    assert np.isclose(risk, expected["risk"], atol=1e-12)
+    assert np.isclose(
+        spectral_effective_bets(w, sigma),
+        expected["spectral_effective_bets"],
+        atol=1e-10,
+    )
+
+
+def test_spectral_bet_diagnostics_detects_degenerate_basis():
+    diag = spectral_bet_diagnostics(np.eye(4))
+    assert diag["basis_identified"] is False
+    assert len(diag["near_degenerate_pairs"]) == 3
+
+
+def test_spectral_bet_diagnostics_accepts_separated_spectrum():
+    diag = spectral_bet_diagnostics(np.diag([1.0, 2.0, 4.0]))
+    assert diag["basis_identified"] is True
+    assert diag["near_degenerate_pairs"] == []

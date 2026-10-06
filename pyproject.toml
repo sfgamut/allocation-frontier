@@ -1,7 +1,7 @@
 [project]
 name = "allocation-frontier"
-version = "0.2.0"
-description = "Optimización de portafolios research-grade: estimadores robustos de covarianza (Ledoit-Wolf, RMT), Black-Litterman, frontera resampleada y backtest walk-forward sin lookahead."
+version = "0.3.0"
+description = "Optimización de portafolios research-grade: estimadores robustos, Black-Litterman y walk-forward sin lookahead con weight drift y costes pathwise."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
