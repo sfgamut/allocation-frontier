@@ -137,6 +137,13 @@ class LedoitWolfShrinkage:
         sd = np.sqrt(var)
         outer_sd = np.outer(sd, sd)
 
+        # Con un solo activo no existe correlación fuera de diagonal que
+        # estimar. El target de correlación constante degenera exactamente
+        # en la varianza muestral; no debe producir mean(empty) -> NaN.
+        if n == 1:
+            self.shrinkage_ = 0.0
+            return ensure_psd(s)
+
         corr = s / outer_sd
         mask = ~np.eye(n, dtype=bool)
         r_bar = corr[mask].mean()
