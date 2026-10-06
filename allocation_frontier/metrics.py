@@ -53,3 +53,61 @@ def average_turnover(weight_history: np.ndarray) -> float:
     if len(w) < 2:
         return 0.0
     return float(np.abs(np.diff(w, axis=0)).sum(axis=1).mean() / 2.0)
+
+
+def spectral_effective_bets(
+    weights: np.ndarray,
+    sigma: np.ndarray,
+    min_weight: float = 0.005,
+) -> float:
+    """Número efectivo de apuestas sobre factores PCA de la covarianza.
+
+    Replica la definición usada actualmente por SATOR/TU PORTAFOLIO:
+
+        q_k = lambda_k * (v_k^T w)^2
+        p_k = q_k / sum(q)
+        ENB = exp(-sum_k p_k log p_k)
+
+    donde (lambda_k, v_k) son autovalores/autovectores de la covarianza
+    restringida a activos con peso > min_weight.
+
+    Importante: esto es un ENB espectral/PCA. No se etiqueta como el
+    minimum-torsion ENB de Meucci, que usa otra elección de factores.
+    """
+    w = np.asarray(weights, dtype=float).reshape(-1)
+    s = np.asarray(sigma, dtype=float)
+    if s.ndim != 2 or s.shape[0] != s.shape[1]:
+        raise ValueError("sigma debe ser cuadrada")
+    if len(w) != s.shape[0]:
+        raise ValueError("weights y sigma no tienen la misma dimensión")
+    if not np.isfinite(w).all() or not np.isfinite(s).all():
+        raise ValueError("weights/sigma contiene NaN/Inf")
+    if not np.isfinite(min_weight) or min_weight < 0:
+        raise ValueError("min_weight debe ser finito y >= 0")
+    if (w < 0).any():
+        raise ValueError("spectral_effective_bets espera pesos long-only")
+    total_w = float(w.sum())
+    if total_w <= 0:
+        raise ValueError("weights debe tener suma positiva")
+    w = w / total_w
+
+    idx = np.flatnonzero(w > min_weight)
+    if len(idx) == 0:
+        return 1.0
+
+    ws = w[idx]
+    sub = s[np.ix_(idx, idx)]
+    sub = 0.5 * (sub + sub.T)
+    vals, vecs = np.linalg.eigh(sub)
+    if vals.min(initial=0.0) < -1e-10:
+        raise ValueError("sigma debe ser PSD")
+    vals = np.clip(vals, 0.0, None)
+
+    exposures = vecs.T @ ws
+    contributions = vals * exposures**2
+    total = float(contributions.sum())
+    if total <= 0:
+        return 1.0
+    p = contributions / total
+    nz = p > 1e-12
+    return float(np.exp(-np.sum(p[nz] * np.log(p[nz]))))
