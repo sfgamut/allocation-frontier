@@ -54,8 +54,27 @@ def implied_equilibrium_returns(
     hacia activos de alta covarianza con el 1/N.
     """
     sigma = np.asarray(sigma, dtype=float)
+    if sigma.ndim != 2 or sigma.shape[0] != sigma.shape[1]:
+        raise ValueError("Sigma debe ser cuadrada")
+    if not np.isfinite(sigma).all():
+        raise ValueError("Sigma contiene valores no finitos")
+    if not np.isfinite(risk_aversion) or risk_aversion <= 0:
+        raise ValueError("risk_aversion debe ser finito y > 0")
+
     n = sigma.shape[0]
-    w = np.full(n, 1.0 / n) if market_weights is None else np.asarray(market_weights, float)
+    if market_weights is None:
+        w = np.full(n, 1.0 / n)
+    else:
+        w = np.asarray(market_weights, dtype=float).reshape(-1)
+        if len(w) != n:
+            raise ValueError("market_weights debe tener una entrada por activo")
+        if not np.isfinite(w).all():
+            raise ValueError("market_weights contiene valores no finitos")
+        if not np.isclose(w.sum(), 1.0, atol=1e-8):
+            raise ValueError("market_weights debe sumar 1")
+        if (w < 0).any():
+            raise ValueError("market_weights de equilibrio no admite pesos negativos")
+
     return risk_aversion * sigma @ w
 
 
