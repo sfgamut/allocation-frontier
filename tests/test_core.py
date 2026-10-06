@@ -1,7 +1,11 @@
+import json
+from pathlib import Path
+
 import numpy as np
 import pytest
 
 from allocation_frontier.backtest import walk_forward
+from allocation_frontier.moments.covariance import LedoitWolfShrinkage
 from allocation_frontier.metrics import max_drawdown, sharpe_ratio, spectral_effective_bets
 from allocation_frontier.moments.returns import (
     absolute_view,
@@ -284,3 +288,25 @@ def test_spectral_effective_bets_respects_sator_weight_threshold():
     sigma = np.eye(3)
     w = np.array([0.994, 0.003, 0.003])
     assert np.isclose(spectral_effective_bets(w, sigma, min_weight=0.005), 1.0)
+
+
+def test_sator_allocation_parity_fixture():
+    fixture_path = Path(__file__).parent / "fixtures" / "allocation_parity.v1.json"
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    r = np.asarray(fixture["returns"], dtype=float)
+    w = np.asarray(fixture["weights"], dtype=float)
+    expected = fixture["expected"]
+
+    est = LedoitWolfShrinkage()
+    sigma = est.estimate(r)
+
+    assert np.isclose(est.shrinkage_, expected["shrinkage"], atol=1e-12)
+    assert np.allclose(sigma, np.asarray(expected["covariance"]), atol=1e-12)
+
+    risk = float(np.sqrt(w @ sigma @ w))
+    assert np.isclose(risk, expected["risk"], atol=1e-12)
+    assert np.isclose(
+        spectral_effective_bets(w, sigma),
+        expected["spectral_effective_bets"],
+        atol=1e-10,
+    )
