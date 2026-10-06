@@ -15,6 +15,7 @@ from .moments.returns import black_litterman, historical_mean, implied_equilibri
 from .optimize import equal_weight, max_sharpe, min_variance, target_return
 from .frontier import efficient_frontier, resampled_frontier, simulate_moments
 from .backtest import run_comparison, walk_forward
+from .metrics import spectral_effective_bets
 from . import data, metrics, plotting
 
 __all__ = [
@@ -22,5 +23,6 @@ __all__ = [
     "historical_mean", "black_litterman", "implied_equilibrium_returns",
     "min_variance", "max_sharpe", "target_return", "equal_weight",
     "efficient_frontier", "resampled_frontier", "simulate_moments",
-    "walk_forward", "run_comparison", "data", "metrics", "plotting",
+    "walk_forward", "run_comparison", "spectral_effective_bets",
+    "data", "metrics", "plotting",
 ]
