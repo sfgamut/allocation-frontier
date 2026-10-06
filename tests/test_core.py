@@ -6,7 +6,12 @@ import pytest
 
 from allocation_frontier.backtest import walk_forward
 from allocation_frontier.moments.covariance import LedoitWolfShrinkage
-from allocation_frontier.metrics import max_drawdown, sharpe_ratio, spectral_effective_bets
+from allocation_frontier.metrics import (
+    max_drawdown,
+    sharpe_ratio,
+    spectral_bet_diagnostics,
+    spectral_effective_bets,
+)
 from allocation_frontier.moments.returns import (
     absolute_view,
     black_litterman,
@@ -310,3 +315,15 @@ def test_sator_allocation_parity_fixture():
         expected["spectral_effective_bets"],
         atol=1e-10,
     )
+
+
+def test_spectral_bet_diagnostics_detects_degenerate_basis():
+    diag = spectral_bet_diagnostics(np.eye(4))
+    assert diag["basis_identified"] is False
+    assert len(diag["near_degenerate_pairs"]) == 3
+
+
+def test_spectral_bet_diagnostics_accepts_separated_spectrum():
+    diag = spectral_bet_diagnostics(np.diag([1.0, 2.0, 4.0]))
+    assert diag["basis_identified"] is True
+    assert diag["near_degenerate_pairs"] == []
