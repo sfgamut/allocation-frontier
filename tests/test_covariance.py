@@ -129,3 +129,13 @@ def test_ledoit_wolf_one_asset_degenerates_to_its_mle_variance():
     assert sigma.shape == (1, 1)
     assert np.isclose(sigma[0, 0], expected, atol=1e-12)
     assert est.shrinkage_ == 0.0
+
+
+def test_rmt_one_asset_returns_sample_covariance():
+    r = RNG.normal(0, 0.01, size=(100, 1))
+    est = RMTDenoisedCovariance()
+    result = est.estimate(r)
+    sample = SampleCovariance().estimate(r)
+    assert result.shape == (1, 1)
+    assert np.allclose(result, sample, atol=1e-12)
+    assert est.n_signal_ is None
